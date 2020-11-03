@@ -1,0 +1,77 @@
+#!/usr/local/bin/python3
+import os
+import time
+import threading
+import re
+import argparse
+import sys
+import subprocess
+from string import Template
+
+def macSetClipboard(text):
+    outf = os.popen('pbcopy', 'w')
+    outf.write(text)
+    outf.close()
+
+def macGetClipboard():
+    outf = os.popen('pbpaste', 'r')
+    content = outf.read()
+    outf.close()
+    return content
+
+def process_string(commands, clip, verbose):
+  if clip != "":
+    print(f"testing: '{clip}'")
+    for regex_str, command_fn in commands:
+      if re.search(regex_str, clip):
+        print(f"Matched {regex_str}!")
+        command_fn(clip)
+
+
+class ClipboardWatcher(threading.Thread):
+  def __init__(self, commands, verbose=True, pause=0.1):
+    super(ClipboardWatcher, self).__init__()
+    self._pause = pause
+    self._commands = commands
+    self._verbose = verbose
+    self._stopping = False
+
+  def run(self):
+    recent_value = ""
+    while not self._stopping:
+      tmp_value = macGetClipboard()
+      if tmp_value != recent_value:
+        recent_value = tmp_value
+        print(recent_value)
+        process_string(self._commands, recent_value, self._verbose)
+        time.sleep(self._pause)
+
+  def stop(self):
+    self._stopping = True
+
+seperator = "~~~\n"
+
+def spit_append(file_path, contents):
+  f = open(file_path, 'a')
+  f.write(contents)
+  f.close()
+
+def add_torrent(magnet_link):
+  subprocess.call(f"ssh -t pi@192.168.1.9 \"transmission-remote --auth transmission:transmission -a '{magnet_link}'\"", shell=True)
+
+all_commands = [['.*', lambda s: spit_append("clips.txt", "~~~\n" + s + "\n")],
+                ['^http(s*).*', lambda s: spit_append("links.txt", "~~~\n" + s + "\n")],
+                ['^magnet.*', add_torrent]]
+
+def main():
+   watcher = ClipboardWatcher(all_commands)
+   watcher.start()
+   while True:
+     try:
+       time.sleep(10)
+     except KeyboardInterrupt:
+       watcher.stop()
+       break
+
+if __name__ == "__main__":
+    main()
